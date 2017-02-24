@@ -34,6 +34,7 @@ else:
 
 import arcpy
 from restapi import admin, munch
+from restapi.rest_utils import namedTuple
 
 __all__ = ['admin', 'find_ws', 'form_connection_string']
 
@@ -52,7 +53,7 @@ def Message(*args):
 
 class ServerAdministrator(object):
     def __init__(self, server_url, usr='', pw='', token=''):
-        self.ags = admin.ArcServerAdmin(url, usr, pw, token)
+        self.ags = admin.ArcServerAdmin(server_url, usr, pw, token)
         self.__stopped_services = []
         self.__started_services = []
 
@@ -219,14 +220,14 @@ class ServerAdministrator(object):
             self.__started_services.append(s)
 
 
-    def stopServiceAndCompressDB(self, sde_loc, service_url_or_name):
+    def stopServiceAndCompressDatabase(self, sde_loc, service_url_or_name):
         """will stop a service and compress all SDE databases within the map service
 
         Required:
             sde_loc -- location containing .sde connections
             service_url_or_name -- full path to REST endpoint or service name
         """
-        service = self.ags.Service(service_url_or_name)
+        service = self.ags.service(service_url_or_name)
         msd = service.properties.filePath
         workspaces = {}
         with TemporaryDirectory() as tmp:
@@ -234,10 +235,9 @@ class ServerAdministrator(object):
 
             # read layer xmls to find all workspaces
             layer_path = os.path.join(tmp, 'layers')
-            for xml in glob.glob(os.path.join(layer_path, '*.xml')):
-                tree = et.parse(xml)
-                root = tree.getroot()
-                for node in root.getiterator('DataConnection'):
+            for fl in glob.glob(os.path.join(layer_path, '*.xml')):
+                doc = BaseXML(fl)
+                for node in doc.iterTags('DataConnection'):
                     wsd = {c.tag: c.text for c in iter(node)}
                     ws = namedTuple('DataConnection', wsd)
                     if ws.WorkspaceFactory == 'SDE' and ws.Dataset.split('.')[0] not in workspaces:
