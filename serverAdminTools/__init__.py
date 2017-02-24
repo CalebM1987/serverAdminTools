@@ -9,29 +9,9 @@
 # Licence:     <your licence>
 #-------------------------------------------------------------------------------
 from restapi import admin
-from _xmlBase import *
 import os
 import glob
 import shutil
-import sys
-if sys.version_info[0] == 3:
-    from tempfile import TemporaryDirectory
-else:
-    import tempfile
-    class TemporaryDirectory(object):
-        """Context manager for tempfile.mkdtemp() so it's usable with "with" statement."""
-        def __enter__(self):
-            self.name = tempfile.mkdtemp()
-            return self.name
-
-        def __exit__(self, exc_type, exc_value, traceback):
-            try:
-                shutil.rmtree(self.name)
-            except:
-                try:
-                    os.rmdir(self.name)
-                except:pass
-
 import arcpy
 from restapi.rest_utils import namedTuple
 
@@ -124,16 +104,20 @@ class ServerAdministrator(object):
     @staticmethod
     def form_connection_string(ws):
         """esri's describe workspace connection string does not work at 10.4, bug???"""
-        cp = arcpy.Describe(ws).connectionProperties
-        props =  ['server', 'instance', 'database', 'version', 'authentication_mode']
-        db_client = cp.instance.split(':')[1]
-        con_properties = cp.server
-        parts = []
-        for prop in props:
-            parts.append('{}={}'.format(prop.upper(), getattr(cp, prop)))
-        parts.insert(2, 'DBCLIENT={}'.format(db_client))
-        parts.insert(3, 'DB_CONNECTION_PROPERTIES={}'.format(cp.server))
-        return ';'.join(parts)
+        desc = arcpy.Describe(ws)
+        if desc.workspaceFactoryProgID == 'esriDataSourcesGDB.SdeWorkspaceFactory.1':
+            cp = desc.connectionProperties
+            props =  ['server', 'instance', 'database', 'version', 'authentication_mode']
+            db_client = cp.instance.split(':')[1]
+            con_properties = cp.server
+            parts = []
+            for prop in props:
+                parts.append('{}={}'.format(prop.upper(), getattr(cp, prop)))
+            parts.insert(2, 'DBCLIENT={}'.format(db_client))
+            parts.insert(3, 'DB_CONNECTION_PROPERTIES={}'.format(cp.server))
+            return ';'.join(parts)
+        else:
+            return 'DATABASE=' + ws
 
     def find_services_containing(self, ws, fcs=[], stop=False):
         """finds services containing an entire workspace and any specific feature classes
@@ -149,63 +133,37 @@ class ServerAdministrator(object):
         con_str = self.form_connection_string(ws)
         service_map = {'workspace': [], 'feature_classes': {}}
         toStop = []
-        with TemporaryDirectory() as tmp:
-            for fc in fcs:
-                service_map['feature_classes'][fc] = []
 
-            # iterate through services and find matching workspace/layers
-            for service in self.ags.iter_services():
-                if hasattr(service, 'type') and service.type == 'MapServer':
-                    ws_found = False
-                    layers_found = []
-                    # feature servers have map servers too
-                    msd = service.properties.filePath
-                    if os.path.exists(msd):
-                        tmp = tempfile.mkdtemp()
-                        unzip(msd, tmp)
+        for fc in fcs:
+            service_map['feature_classes'][fc.split('.')[-1]] = []
+
+        # iterate through services and find matching workspace/layers
+        for service in self.ags.iter_services():
+            if hasattr(service, 'type') and service.type == 'MapServer':
+                # feature servers have map servers too
+                manifest = service.manifest()
+                if hasattr(manifest, 'databases'):
+                    for db in manifest.databases:
 
                         # iterate through all layers to find workspaces/fc's
-                        layer_path = os.path.join(tmp, 'layers')
-                        for fl in glob.glob(os.path.join(layer_path, '*.xml')):
-                            if os.path.basename(fl) != 'layers.xml':
-                                doc = BaseXML(fl)
-                                # get connection string from xml
-                                csElm = doc.getElm('WorkspaceConnectionString')
-                                if csElm is not None:
-                                    cs = csElm.text
-                                    if cs == con_str and not ws_found:
-                                        service_map['workspace'].append({
-                                            'name': service.serviceName,
-                                            'serviceObj': service
-                                        })
-                                        ws_found = True
-                                        if service not in toStop:
-                                            toStop.append(service)
+                        if con_str in [db.onServerConnectionString, db.onPremiseConnectionString]:
+                            service_map['workspace'].append({
+                                'name': service.serviceName,
+                                'serviceObj': service
+                            })
+                            if service not in toStop:
+                                toStop.append(service)
 
-
-                                    # check for specific feature classes
-                                    lyrElm = doc.getElm('Dataset')
-                                    if lyrElm is not None and fcs:
-                                        lyr_name = lyrElm.text
-                                        if lyr_name in service_map['feature_classes']:
-                                            service_map['feature_classes'][lyr_name].append({
-                                                'name': service.serviceName,
-                                                'serviceObj': service
-                                            })
-                                            layers_found.append(lyr_name)
-                                            if service not in toStop:
-                                                toStop.append(service)
-
-
-                            # clean up
-                            try:
-                                os.remove(fl)
-                            except: pass
-
-                            # stop searching in this service if workspace and/or all layers have been found
-                            if ws_found and (not fcs or sorted(fcs) == sorted(layers_found)):
-                                break
-
+                            # check for specific feature classes
+                            for ds in db.datasets:
+                                lyr_name = ds.onServerName
+                                if lyr_name in service_map['feature_classes']:
+                                    service_map['feature_classes'][lyr_name].append({
+                                        'name': service.serviceName,
+                                        'serviceObj': service
+                                    })
+                                    if service not in toStop:
+                                        toStop.append(service)
 
         if stop:
             for service in toStop:
@@ -234,31 +192,29 @@ class ServerAdministrator(object):
             service_url_or_name -- full path to REST endpoint or service name
         """
         service = self.ags.service(service_url_or_name)
-        msd = service.properties.filePath
-        workspaces = {}
-        with TemporaryDirectory() as tmp:
-            unzip(msd, tmp)
+        workspaces = []
+        manifest = service.manifest()
+        if hasattr(manifest, 'databases'):
 
-            # read layer xmls to find all workspaces
-            layer_path = os.path.join(tmp, 'layers')
-            for fl in glob.glob(os.path.join(layer_path, '*.xml')):
-                doc = BaseXML(fl)
-                for node in doc.iterTags('DataConnection'):
-                    wsd = {c.tag: c.text for c in iter(node)}
-                    ws = namedTuple('DataConnection', wsd)
-                    if ws.WorkspaceFactory == 'SDE' and ws.Dataset.split('.')[0] not in workspaces:
-                        workspaces[ws.Dataset.split('.')[0]] = ws
+            for db in manifest.databases:
+                # read layer xmls to find all workspaces
+                dbType = db.onServerWorkspaceFactoryProgID
+                if dbType == 'esriDataSourcesGDB.SdeWorkspaceFactory.1':
+                    cs = db.onServerConnectionString or db.onPremiseConnectionString
+                    db_name = {k:v for k, v in iter(s.split('=') for s in cs.split(';'))}['DATABASE']
+                    sde = os.path.join(sde_loc, db_name + '.sde')
+                    workspaces.append(sde)
+
+        if workspaces:
 
             # stop service
             service.stop()
             self.__stopped_services.append(service)
             Message('Stopped Service...\n')
 
-            # compress sde
-            for db_name in workspaces.keys():
-                sde = os.path.join(sde_loc, db_name + '.sde')
-                arcpy.management.Compress(sde)
-                Message('Compressed SDE Database: {}'.format(os.path.basename(sde)))
+            # compress databases
+            for ws in workspaces:
+                arcpy.management.Compress(ws)
 
             # start service
             service.start()
