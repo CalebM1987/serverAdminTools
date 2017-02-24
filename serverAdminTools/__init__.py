@@ -215,6 +215,7 @@ class ServerAdministrator(object):
         """
         for s in self.__stopped_services:
             s.start()
+            Message('Started service: "{}"'.format(s.serviceName))
             self.__stopped_services.remove(s)
             self.__started_services.append(s)
 
