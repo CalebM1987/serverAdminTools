@@ -33,7 +33,6 @@ else:
                 except:pass
 
 import arcpy
-from restapi import admi
 from restapi.rest_utils import namedTuple
 
 __all__ = ['ServerAdministrator']
