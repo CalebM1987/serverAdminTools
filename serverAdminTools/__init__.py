@@ -150,7 +150,6 @@ class ServerAdministrator(object):
         con_str = self.form_connection_string(ws)
         service_map = {'workspace': [], 'feature_classes': {}}
         with TemporaryDirectory() as tmp:
-            print tmp
             for fc in fcs:
                 service_map['feature_classes'][fc] = []
 
