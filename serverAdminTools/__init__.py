@@ -149,6 +149,7 @@ class ServerAdministrator(object):
         ws = self.find_ws(ws)
         con_str = self.form_connection_string(ws)
         service_map = {'workspace': [], 'feature_classes': {}}
+        toStop = []
         with TemporaryDirectory() as tmp:
             for fc in fcs:
                 service_map['feature_classes'][fc] = []
@@ -179,6 +180,8 @@ class ServerAdministrator(object):
                                             'serviceObj': service
                                         })
                                         ws_found = True
+                                        if service not in toStop:
+                                            toStop.append(service)
 
 
                                     # check for specific feature classes
@@ -191,6 +194,8 @@ class ServerAdministrator(object):
                                                 'serviceObj': service
                                             })
                                             layers_found.append(lyr_name)
+                                            if service not in toStop:
+                                                toStop.append(service)
 
 
                             # clean up
@@ -200,12 +205,14 @@ class ServerAdministrator(object):
 
                             # stop searching in this service if workspace and/or all layers have been found
                             if ws_found and (not fcs or sorted(fcs) == sorted(layers_found)):
-                                if stop:
-                                    service.stop()
-                                    Message('Stopped service: "{}"'.format(service.serviceName))
-                                    self.__stopped_services.append(service)
                                 break
 
+
+        if stop:
+            for service in toStop:
+                service.stop()
+                Message('Stopped service: "{}"'.format(service.serviceName))
+                self.__stopped_services.append(service)
         return service_map
 
 
