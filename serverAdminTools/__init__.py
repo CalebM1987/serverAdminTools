@@ -10,10 +10,7 @@
 #-------------------------------------------------------------------------------
 from restapi import admin
 import os
-import glob
-import shutil
 import arcpy
-from restapi.rest_utils import namedTuple
 
 __all__ = ['ServerAdministrator']
 
@@ -105,7 +102,7 @@ class ServerAdministrator(object):
     def form_connection_string(ws):
         """esri's describe workspace connection string does not work at 10.4, bug???"""
         desc = arcpy.Describe(ws)
-        if desc.workspaceFactoryProgID == 'esriDataSourcesGDB.SdeWorkspaceFactory.1':
+        if 'SdeWorkspaceFactory' in desc.workspaceFactoryProgID:
             cp = desc.connectionProperties
             props =  ['server', 'instance', 'database', 'version', 'authentication_mode']
             db_client = cp.instance.split(':')[1]
@@ -199,7 +196,7 @@ class ServerAdministrator(object):
             for db in manifest.databases:
                 # read layer xmls to find all workspaces
                 dbType = db.onServerWorkspaceFactoryProgID
-                if dbType == 'esriDataSourcesGDB.SdeWorkspaceFactory.1':
+                if 'SdeWorkspaceFactory' in dbType:
                     cs = db.onServerConnectionString or db.onPremiseConnectionString
                     db_name = {k:v for k, v in iter(s.split('=') for s in cs.split(';'))}['DATABASE']
                     sde = os.path.join(sde_loc, db_name + '.sde')
