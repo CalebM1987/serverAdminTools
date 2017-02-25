@@ -99,6 +99,14 @@ class ServerAdministrator(object):
                         return sub_dir
 
     @staticmethod
+    def test_connection_string(string1, string2):
+        """tests if a database has the same instance and name"""
+        db_props1 = {k:v for k, v in iter(s.split('=') for s in string1.split(';'))}
+        db_props2 = {k:v for k, v in iter(s.split('=') for s in string2.split(';'))}
+        return ';'.join([db_props1.get('DATABASE'), db_props1.get('INSTANCE','NULL')]) == ';'.join([db_props2.get('DATABASE'), db_props2.get('INSTANCE','NULL')])
+
+
+    @staticmethod
     def form_connection_string(ws):
         """esri's describe workspace connection string does not work at 10.4, bug???"""
         desc = arcpy.Describe(ws)
@@ -143,7 +151,7 @@ class ServerAdministrator(object):
                     for db in manifest.databases:
 
                         # iterate through all layers to find workspaces/fc's
-                        if con_str in [db.onServerConnectionString, db.onPremiseConnectionString]:
+                        if self.test_connection_string(con_str, db.onServerConnectionString) or self.test_connection_string(con_str, db.onPremiseConnectionString):
                             service_map['workspace'].append({
                                 'name': service.serviceName,
                                 'serviceObj': service
